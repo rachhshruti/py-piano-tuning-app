@@ -5,6 +5,7 @@
 
 ## Install Dependencies
 ```shell
+    brew install portaudio
     pip3 install -r requirements.txt
 ```
 

@@ -3,11 +3,10 @@ import json
 import logging
 import numpy as np
 import os
-from scipy.fft import rfft, rfftfreq
-from scipy.io import wavfile
-import sounddevice as sd
+import pyaudio
+from scipy.fft import fft, fftfreq
 import sys
-import wavio as wv
+import wave
 
 
 def read_piano_notes_frequency():
@@ -16,17 +15,40 @@ def read_piano_notes_frequency():
     return piano_notes_dict
 
 
-def record_note(sampling_freq, duration, output_file):
+def record_note(sampling_freq, chunk_size, output_file, seconds=3):
     # Start recorder with the given values of
     # duration and sample frequency
-    recording = sd.rec(int(duration * sampling_freq),
-                       samplerate=sampling_freq, channels=1)
+    audio_format = pyaudio.paInt16
+    channels = 1
+    p = pyaudio.PyAudio()
 
-    # Record audio for the given number of seconds
-    sd.wait()
+    stream = p.open(format=audio_format,
+                    channels=channels,
+                    rate=sampling_freq,
+                    input=True,
+                    frames_per_buffer=chunk_size)
 
-    # Convert the NumPy array to audio file
-    wv.write(output_file, recording, sampling_freq, sampwidth=1)
+    logging.info("Recording...")
+    frames = []
+
+    # Store data in frames for 3 seconds
+    for i in range(0, int(sampling_freq / chunk_size * seconds)):
+        data = stream.read(chunk_size)
+        frames.append(data)
+
+    # Stop and close the stream
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
+
+    logging.info("Finished recording")
+
+    wf = wave.open(output_file, 'wb')
+    wf.setnchannels(channels)
+    wf.setsampwidth(p.get_sample_size(audio_format))
+    wf.setframerate(sampling_freq)
+    wf.writeframes(b''.join(frames))
+    wf.close()
 
 
 def clean_recording_files():
@@ -35,17 +57,31 @@ def clean_recording_files():
         os.remove(recording_file)
 
 
+def read_wav_file(filename):
+    with wave.open(filename, 'rb') as wav_file:
+        # Get file parameters
+        framerate = wav_file.getframerate()
+        nframes = wav_file.getnframes()
+
+        # Read the audio data
+        audio_data = wav_file.readframes(nframes)
+
+        # Convert audio data to a NumPy array (optional)
+        import numpy as np
+        audio_data = np.frombuffer(audio_data, dtype=np.int16)
+
+        return audio_data, framerate
+
+
 def get_frequency_note(output_file):
     # Open the file and convert to mono
-    sr, data = wavfile.read(output_file)
-    if data.ndim > 1:
-        data = data[:, 0]
-    else:
-        pass
+    data, sr = read_wav_file(output_file)
+    logging.info(data)
+    logging.info(sr)
 
     # Fourier Transform
-    yf = rfft(data)
-    xf = rfftfreq(len(data), 1 / sr)
+    yf = fft(data[:sr*3])
+    xf = fftfreq(sr*3, 1 / sr)
 
     # Uncomment these to see the frequency spectrum as a plot
     # plt.plot(xf, np.abs(yf))
@@ -63,10 +99,11 @@ def tune_piano_note(actual_note_frequency_to_tune):
     while current_note_frequency != actual_note_frequency_to_tune:
         logging.info('Recording the note to tune, number of tries=%d..', retries)
         output_file = 'recordings/recording_' + str(retries) + ".wav"
-        record_note(44100, 3, output_file)
+        record_note(44100, 1024, output_file)
         logging.info('Finding current frequency of the recorded note to tune..')
         current_note_frequency = get_frequency_note(output_file)
-        logging.info('current note frequency=', current_note_frequency)
+        logging.info('current note frequency=%f', current_note_frequency)
+        retries = retries + 1
     clean_recording_files()
 
 
