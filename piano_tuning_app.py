@@ -10,14 +10,25 @@ import wave
 
 
 def read_piano_notes_frequency():
+    '''
+    Reads the list of piano notes and it's frequencies from json file
+    :return: dictionary of piano notes frequencies
+    '''
     with open('config/piano_notes_frequency.json', 'r') as file:
         piano_notes_dict = json.load(file)
     return piano_notes_dict
 
 
-def record_note(sampling_freq, chunk_size, output_file, seconds=3):
-    # Start recorder with the given values of
-    # duration and sample frequency
+def record_note(sampling_freq, chunk_size, output_file, duration=3):
+    '''
+    Records the note for fixed duration and saves in .wav file
+    :param sampling_freq: sampling frequency is the number of times per second that an analog audio signal is sampled to
+    create a digital file. Example, 44100 is the standard sample rate for most consumer audio, like CDs.
+    :param chunk_size: chunk size refers to the amount of audio data that is processed and stored together as a single
+    unit
+    :param output_file: name of .wav file to store the recording
+    :param duration: duration of the recording in seconds, default is 3 seconds.
+    '''
     audio_format = pyaudio.paInt16
     channels = 1
     p = pyaudio.PyAudio()
@@ -28,15 +39,13 @@ def record_note(sampling_freq, chunk_size, output_file, seconds=3):
                     input=True,
                     frames_per_buffer=chunk_size)
 
-    logging.info("Recording...")
+    logging.info("Recording for duration of %d seconds...", duration)
     frames = []
 
-    # Store data in frames for 3 seconds
-    for i in range(0, int(sampling_freq / chunk_size * seconds)):
+    for i in range(0, int(sampling_freq / chunk_size * duration)):
         data = stream.read(chunk_size)
         frames.append(data)
 
-    # Stop and close the stream
     stream.stop_stream()
     stream.close()
     p.terminate()
@@ -52,40 +61,44 @@ def record_note(sampling_freq, chunk_size, output_file, seconds=3):
 
 
 def clean_recording_files():
+    '''
+    Deletes/cleans up .wav files used for storing piano note recording after a note is successfully tuned.
+    '''
     recording_files = glob.glob('recordings/*')
     for recording_file in recording_files:
         os.remove(recording_file)
 
 
 def read_wav_file(filename):
+    '''
+    Reads wav file that stores a single note that is being tuned.
+    :param filename: name of the .wav file
+    :return: audio data and sampling_frequency
+    '''
     with wave.open(filename, 'rb') as wav_file:
-        # Get file parameters
-        framerate = wav_file.getframerate()
+        sampling_frequency = wav_file.getframerate()
         nframes = wav_file.getnframes()
 
         # Read the audio data
         audio_data = wav_file.readframes(nframes)
 
-        # Convert audio data to a NumPy array (optional)
-        import numpy as np
         audio_data = np.frombuffer(audio_data, dtype=np.int16)
 
-        return audio_data, framerate
+        return audio_data, sampling_frequency
 
 
-def get_frequency_note(output_file):
-    # Open the file and convert to mono
+def get_frequency_note(output_file, duration=3):
+    '''
+    Finds frequency of the note from the .wav file
+    :param output_file: name of wav file that has recording of single note
+    :param duration: duration of the audio should be same as above when recording the note, default is 3 seconds
+    :return: frequency of note to be tuned
+    '''
     data, sr = read_wav_file(output_file)
-    logging.info(data)
-    logging.info(sr)
 
     # Fourier Transform
-    yf = fft(data[:sr*3])
-    xf = fftfreq(sr*3, 1 / sr)
-
-    # Uncomment these to see the frequency spectrum as a plot
-    # plt.plot(xf, np.abs(yf))
-    # plt.show()
+    yf = fft(data[:sr*duration])
+    xf = fftfreq(sr*duration, 1 / sr)
 
     # Get the most dominant frequency and return it
     idx = np.argmax(np.abs(yf))
@@ -94,6 +107,12 @@ def get_frequency_note(output_file):
 
 
 def tune_piano_note(actual_note_frequency_to_tune):
+    '''
+    Tune the piano note passed as command line argument. Records the note to be tuned, finds it's frequency and then
+    compares it to actual frequency and until the two frequencies does not match, it repeats these steps.
+    Cleans the recording files once the note is successfully tuned.
+    :param actual_note_frequency_to_tune: actual frequency of the note to be tuned
+    '''
     current_note_frequency = 0
     retries = 1
     while current_note_frequency != actual_note_frequency_to_tune:
